@@ -1,0 +1,150 @@
+---
+title: "HW5"
+output: html_document
+date: '2022-05-15'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(visdat)
+library(corrplot)
+library(discrim)
+library(klaR)
+library(yardstick)
+library(glmnet)
+set.seed(45)
+```
+
+```{r}
+data <- read.csv('data/pokemon.csv')
+head(data)
+```
+
+## Question 1
+
+```{r}
+library(janitor)
+```
+
+```{r}
+data <- clean_names(data)
+head(data)
+```
+
+The function changed all the capital letters included in the names of labels in the data into lower case letters. THis makes it much easier to handel the data since R is sensitive to lower case and lower case.
+
+## Question 2
+
+```{r}
+data %>% ggplot(aes(x = type_1)) + 
+  geom_bar()
+```
+
+According to bar plot, there are some types with very few pokemons, for example 'Flying' type.
+
+```{r}
+data <- filter(data, type_1 %in% c('Bug', 'Fire', 'Grass', 'Normal', 'Water', 'Psychic'))
+head(data)
+```
+
+```{r}
+data$type_1 = factor(data$type_1)
+data$legendary = factor(data$legendary)
+```
+
+## Question 3
+
+```{r}
+data_split <- initial_split(data, prop = 0.8,
+                                strata = type_1)
+data_train <- training(data_split)
+data_test <- testing(data_split)
+
+cv_folds <- vfold_cv(data_train, v = 5, strata = type_1)
+```
+
+## Question 4
+
+```{r}
+pokemon_recipe = recipe(type_1 ~ legendary + generation + sp_atk, + attack + speed + defense + hp + sp_def, 
+                        data = data_train) %>%
+  step_dummy(c("legendary", "generation")) %>%
+  step_dummy(generation) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors())
+  
+```
+
+## Question 5
+
+```{r}
+ela_mod = multinom_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine('glmnet') 
+
+ela_work = workflow() %>%
+  add_model(ela_mod) %>%
+  add_recipe(pokemon_recipe)
+
+ela_grid = grid_regular(penalty(range = c(-5, 5)), 
+                      mixture(range = c(0, 1)), levels = 10)
+```
+
+5 cv folds, 10 mixture levels, and 10 penalty times make the total number of models 5 \* 10 \* 10 = 500.
+
+## Question 6
+
+```{r}
+ela_res <- tune_grid(object = ela_work, resamples = cv_folds, grid = ela_grid)
+```
+
+```{r}
+autoplot(ela_res)
+```
+
+## Question 7
+
+```{r}
+best_fit = ela_tune %>%
+  select_best("roc_auc")
+
+fit_final = ela_work %>%
+  finalize_workflow(best_fit)
+
+pokemon_fit = fit_final %>%
+  fit(data_train)
+
+pokemon_predict = augment(pokemon_fit, data_test)
+
+```
+
+## Question 8
+
+```{r}
+test_roc_auc = roc_auc(data = pokemon_predict, 
+                       truth = type_1, 
+                       estimate = c(.pred_Bug, .pred_Fire, .pred_Grass, 
+                                  .pred_Normal, .pred_Psychic, .pred_Water), 
+                       estimator = 'macro_weighted')
+test_roc_auc$.estimate
+
+test_curves = roc_curve(data = pokemon_predict, 
+                        truth = type_1, 
+                        estimate = c(.pred_Bug, .pred_Fire, .pred_Grass, 
+                                    .pred_Normal, .pred_Psychic, .pred_Water))
+autoplot(test_curves)
+
+con_matrix = conf_mat(data = pokemon_predict, truth = type_1, estimate = .pred_class)
+heatmap(con_matrix$table)
+
+output: html_document
+date: '2022-05-15'
+---
+
+knitr::opts_chunk$set(echo = TRUE)
+```
